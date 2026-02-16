@@ -3,6 +3,7 @@ import type { AudioModelStatus } from '../bokaTypes';
 import type { LlmProviderConfig, LlmProviderPreset } from '../bokaTypes';
 import { test_tauri_provider } from '../tauriTranslation';
 import { TTS_LANGUAGES, OTHER_LANGUAGES, ALL_LANGUAGES, hasTts } from '../languages';
+import UpdatePanel from '../components/update/UpdatePanel';
 
 export default function SettingsView(props: {
   theme: 'light' | 'dark';
@@ -689,6 +690,8 @@ export default function SettingsView(props: {
           </div>
         </div>
       </div>
+
+      <UpdatePanel currentVersion="0.1.0" />
     </div>
   );
 }

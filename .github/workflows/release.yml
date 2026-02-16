@@ -1,0 +1,215 @@
+# Callibella Release Workflow
+#
+# Builds and releases the Tauri app for all platforms with code signing.
+#
+# Required secrets:
+#   TAURI_SIGNING_PRIVATE_KEY - The private key for signing updates
+#   TAURI_SIGNING_PRIVATE_KEY_PASSWORD - Password for the private key
+#
+# Trigger by pushing a version tag:
+#   git tag v0.1.0
+#   git push origin v0.1.0
+
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  create-release:
+    runs-on: ubuntu-latest
+    outputs:
+      release_id: ${{ steps.create_release.outputs.id }}
+      version: ${{ steps.get_version.outputs.version }}
+    steps:
+      - name: Get version from tag
+        id: get_version
+        run: echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref }}
+          release_name: Callibella v${{ steps.get_version.outputs.version }}
+          draft: true
+          prerelease: false
+
+  build:
+    needs: create-release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest
+            target: aarch64-apple-darwin
+            bundles: dmg
+          - platform: macos-latest
+            target: x86_64-apple-darwin
+            bundles: dmg
+          - platform: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            bundles: appimage,deb
+          - platform: windows-latest
+            target: x86_64-pc-windows-msvc
+            bundles: msi,nsis
+
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install dependencies (Ubuntu)
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build Tauri app
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          releaseId: ${{ needs.create-release.outputs.release_id }}
+          args: --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
+
+  generate-latest:
+    needs: [create-release, build]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download release assets
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p artifacts
+          gh release download ${{ github.ref_name }} -D artifacts -R ${{ github.repository }}
+
+      - name: Generate latest.json
+        env:
+          VERSION: ${{ needs.create-release.outputs.version }}
+          REPO: ${{ github.repository }}
+        run: |
+          get_sig() {
+            local pattern=$1
+            local sig_file=$(ls artifacts/*${pattern}*.sig 2>/dev/null | head -1)
+            if [ -f "$sig_file" ]; then
+              cat "$sig_file"
+            else
+              echo ""
+            fi
+          }
+
+          get_url() {
+            local pattern=$1
+            local file=$(ls artifacts/*${pattern}* 2>/dev/null | grep -v '.sig$' | head -1)
+            if [ -f "$file" ]; then
+              echo "https://github.com/${REPO}/releases/download/v${VERSION}/$(basename $file)"
+            else
+              echo ""
+            fi
+          }
+
+          cat > latest.json << EOF
+          {
+            "version": "${VERSION}",
+            "notes": "See the release notes on GitHub for details.",
+            "pub_date": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "platforms": {
+          EOF
+
+          first=true
+
+          # macOS ARM
+          sig=$(get_sig "aarch64.dmg")
+          url=$(get_url "aarch64.dmg")
+          if [ -n "$sig" ] && [ -n "$url" ]; then
+            [ "$first" = false ] && echo "," >> latest.json
+            first=false
+            cat >> latest.json << EOF
+              "darwin-aarch64": {
+                "signature": "$sig",
+                "url": "$url"
+              }
+          EOF
+          fi
+
+          # macOS Intel
+          sig=$(get_sig "x64.dmg")
+          url=$(get_url "x64.dmg")
+          if [ -n "$sig" ] && [ -n "$url" ]; then
+            [ "$first" = false ] && echo "," >> latest.json
+            first=false
+            cat >> latest.json << EOF
+              "darwin-x86_64": {
+                "signature": "$sig",
+                "url": "$url"
+              }
+          EOF
+          fi
+
+          # Linux
+          sig=$(get_sig "amd64.AppImage")
+          url=$(get_url "amd64.AppImage")
+          if [ -n "$sig" ] && [ -n "$url" ]; then
+            [ "$first" = false ] && echo "," >> latest.json
+            first=false
+            cat >> latest.json << EOF
+              "linux-x86_64": {
+                "signature": "$sig",
+                "url": "$url"
+              }
+          EOF
+          fi
+
+          # Windows NSIS
+          sig=$(get_sig "x64-setup.nsis")
+          url=$(get_url "x64-setup.nsis")
+          if [ -n "$sig" ] && [ -n "$url" ]; then
+            [ "$first" = false ] && echo "," >> latest.json
+            first=false
+            cat >> latest.json << EOF
+              "windows-x86_64": {
+                "signature": "$sig",
+                "url": "$url"
+              }
+          EOF
+          fi
+
+          cat >> latest.json << EOF
+            }
+          }
+          EOF
+
+          cat latest.json
+
+      - name: Upload latest.json
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload ${{ github.ref_name }} latest.json -R ${{ github.repository }} --clobber

@@ -5,6 +5,7 @@ import NewView from './views/NewView';
 import PracticeView from './views/PracticeView';
 import ReviewView from './views/ReviewView';
 import SettingsView from './views/SettingsView';
+import { UpdateProvider } from './components/update/UpdateContext';
 import type {
   AudioModelStatus,
   InteractiveDoc,
@@ -708,39 +709,41 @@ export default function App() {
   const canOpenCompiler = storyText.trim().length > 0 || job != null || doc != null;
 
   return (
-    <div className="app-shell">
-      <div className="topbar">
-        <div className="topbar-left">
-          <div style={{ fontWeight: 700, letterSpacing: 0.5 }}>Callibella</div>
-          <div className="mono muted">{view === 'compiler' ? `Title: ${compilerTitle}` : ''}</div>
+    <UpdateProvider currentVersion="0.1.0" appName="Callibella">
+      <div className="app-shell">
+        <div className="topbar">
+          <div className="topbar-left">
+            <div style={{ fontWeight: 700, letterSpacing: 0.5 }}>Callibella</div>
+            <div className="mono muted">{view === 'compiler' ? `Title: ${compilerTitle}` : ''}</div>
+          </div>
         </div>
-      </div>
 
-      <div className="shell-body">
-        <div className="nav-rail">
-          {navItems.map((it) => (
+        <div className="shell-body">
+          <div className="nav-rail">
+            {navItems.map((it) => (
+              <button
+                key={it.id}
+                className={it.id === view ? 'nav-item active' : 'nav-item'}
+                onClick={() => setView(it.id)}
+              >
+                {it.label}
+              </button>
+            ))}
+            <hr />
             <button
-              key={it.id}
-              className={it.id === view ? 'nav-item active' : 'nav-item'}
-              onClick={() => setView(it.id)}
+              className={view === 'compiler' ? 'nav-item active' : 'nav-item'}
+              onClick={() => setView('compiler')}
+              disabled={!canOpenCompiler}
             >
-              {it.label}
+              VIEWER
             </button>
-          ))}
-          <hr />
-          <button
-            className={view === 'compiler' ? 'nav-item active' : 'nav-item'}
-            onClick={() => setView('compiler')}
-            disabled={!canOpenCompiler}
-          >
-            VIEWER
-          </button>
-        </div>
+          </div>
 
-        <div className="main-surface">
-          {renderSurface()}
+          <div className="main-surface">
+            {renderSurface()}
+          </div>
         </div>
       </div>
-    </div>
+    </UpdateProvider>
   );
 }

@@ -25,6 +25,14 @@
       "csp": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' asset: data: blob:; font-src 'self' data:; connect-src 'self' ipc: tauri:; media-src 'self' asset: blob: data:; frame-src 'none'; object-src 'none'"
     }
   },
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://github.com/billy-and-the-oceans/callibella/releases/latest/download/latest.json"
+      ],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEE4MDY2QzhBOEMyQ0Y1RUMKUldUczlTeU1pbXdHcUMxODhGR0h2TWVEWWllS0NqSlM0d1BnU2wwNFBWL0hiWmp2UzZ1M2dxL0kK"
+    }
+  },
   "bundle": {
     "active": false,
     "targets": "all",

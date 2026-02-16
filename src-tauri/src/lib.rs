@@ -367,6 +367,7 @@ async fn boka_cancel_translation(
 
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(TranslationState::default())
         .manage(AudioState::default())
         .setup(|app| {
