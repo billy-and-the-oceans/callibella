@@ -74,6 +74,12 @@ jobs:
           token: ${{ secrets.FUWA_CLOUD_TOKEN || secrets.GITHUB_TOKEN }}
           path: fuwa-cloud
 
+      - name: Install system dependencies (Ubuntu)
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev pkg-config
+
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
