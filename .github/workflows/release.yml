@@ -70,7 +70,7 @@ jobs:
       - name: Checkout fuwa-cloud monorepo (TUI source)
         uses: actions/checkout@v4
         with:
-          repository: billy-and-the-oceans/fuwa-cloud
+          repository: billy-and-the-oceans/fuwa-monorepo
           token: ${{ secrets.FUWA_CLOUD_TOKEN || secrets.GITHUB_TOKEN }}
           path: fuwa-cloud
 
