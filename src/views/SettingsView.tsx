@@ -1,4 +1,5 @@
 import React from 'react';
+import { version as appVersion } from '../../package.json';
 import type { AudioModelStatus } from '../bokaTypes';
 import type { LlmProviderConfig, LlmProviderPreset } from '../bokaTypes';
 import { test_tauri_provider } from '../tauriTranslation';
@@ -691,7 +692,7 @@ export default function SettingsView(props: {
         </div>
       </div>
 
-      <UpdatePanel currentVersion="0.1.0" />
+      <UpdatePanel currentVersion={appVersion} />
     </div>
   );
 }

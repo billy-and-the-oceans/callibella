@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { version as appVersion } from '../package.json';
 import CompilerView, { type ViewMode } from './views/CompilerView';
 import LibraryView from './views/LibraryView';
 import NewView from './views/NewView';
@@ -747,7 +748,7 @@ export default function App() {
   const canOpenCompiler = storyText.trim().length > 0 || job != null || doc != null;
 
   return (
-    <UpdateProvider currentVersion="0.1.0" appName="Callibella">
+    <UpdateProvider currentVersion={appVersion} appName="Callibella">
       <div className="app-shell">
         <div className="topbar">
           <div className="topbar-left">
