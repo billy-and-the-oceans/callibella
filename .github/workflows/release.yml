@@ -106,7 +106,9 @@ jobs:
       - name: Upload CLI to release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload ${{ github.ref_name }} ${{ env.ARCHIVE }} -R ${{ github.repository }} --clobber
+        run: |
+          echo "${GH_TOKEN}" | gh auth login --with-token
+          gh release upload ${{ github.ref_name }} ${{ env.ARCHIVE }} -R ${{ github.repository }} --clobber
 
   build-gui:
     needs: [create-release, build-cli]
