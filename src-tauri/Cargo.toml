@@ -21,9 +21,9 @@ kokorox = { git = "https://github.com/WismutHansen/kokorox", default-features = 
 base64 = "0.22"
 hound = { version = "3.5", optional = true }
 sha2 = "0.10"
+tauri-plugin-updater = "2"
+dirs = "5"
 
 [features]
 default = []
 tts = ["dep:kokorox", "dep:hound"]
-tauri-plugin-updater = "2"
-dirs = "5"
