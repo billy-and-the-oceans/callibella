@@ -73,6 +73,7 @@ jobs:
           repository: billy-and-the-oceans/fuwa-monorepo
           token: ${{ secrets.FUWA_CLOUD_TOKEN || secrets.GITHUB_TOKEN }}
           path: fuwa-cloud
+          persist-credentials: false
 
       - name: Install system dependencies (Ubuntu)
         if: matrix.platform == 'ubuntu-22.04'
