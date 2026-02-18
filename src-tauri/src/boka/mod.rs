@@ -1,5 +1,7 @@
 pub mod anthropic;
+#[cfg(feature = "tts")]
 pub mod audio;
+#[cfg(feature = "tts")]
 pub mod audio_types;
 pub mod gui_types;
 pub mod openai_compat;
