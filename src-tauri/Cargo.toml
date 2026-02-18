@@ -16,9 +16,14 @@ serde_json = "1.0"
 thiserror = "1.0"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
 # TTS: Kokoro-82M via kokorox (uses ort 2.0.0-rc.11)
-kokorox = { git = "https://github.com/WismutHansen/kokorox", default-features = true }
+# Requires espeak-ng system dep — enable with: cargo build --features tts
+kokorox = { git = "https://github.com/WismutHansen/kokorox", default-features = true, optional = true }
 base64 = "0.22"
-hound = "3.5"
+hound = { version = "3.5", optional = true }
 sha2 = "0.10"
+
+[features]
+default = []
+tts = ["dep:kokorox", "dep:hound"]
 tauri-plugin-updater = "2"
 dirs = "5"

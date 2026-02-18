@@ -9,7 +9,9 @@ use std::sync::{
 use std::time::Instant;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+#[cfg(feature = "tts")]
 use boka::audio::{generate_speech, AudioCache, KokoroEngine};
+#[cfg(feature = "tts")]
 use boka::audio_types::{AudioErrorEvent, AudioModelStatus, AudioProgressEvent, AudioResponse};
 use boka::gui_types::InteractiveDoc;
 use boka::translation::{run_translation, TranslationArgs};
@@ -45,12 +47,14 @@ struct TranslationErrorEvent {
     message: String,
 }
 
+#[cfg(feature = "tts")]
 struct AudioState {
     engine: Arc<Mutex<KokoroEngine>>,
     cache: Arc<Mutex<Option<AudioCache>>>,
     cancelled_by_request: Arc<Mutex<HashMap<String, Arc<AtomicBool>>>>,
 }
 
+#[cfg(feature = "tts")]
 impl Default for AudioState {
     fn default() -> Self {
         Self {
@@ -61,6 +65,7 @@ impl Default for AudioState {
     }
 }
 
+#[cfg(feature = "tts")]
 #[tauri::command]
 #[allow(unused_variables)]
 async fn boka_generate_speech(
@@ -180,6 +185,7 @@ async fn boka_generate_speech(
     Ok(request_id)
 }
 
+#[cfg(feature = "tts")]
 #[tauri::command]
 async fn boka_cancel_audio(
     state: tauri::State<'_, AudioState>,
@@ -192,6 +198,7 @@ async fn boka_cancel_audio(
     Ok(())
 }
 
+#[cfg(feature = "tts")]
 #[tauri::command]
 async fn boka_get_audio_status(
     state: tauri::State<'_, AudioState>,
@@ -200,6 +207,7 @@ async fn boka_get_audio_status(
     Ok(engine.status())
 }
 
+#[cfg(feature = "tts")]
 #[tauri::command]
 async fn boka_preload_model(
     state: tauri::State<'_, AudioState>,
@@ -411,14 +419,14 @@ async fn boka_write_stories(stories: serde_json::Value) -> Result<(), String> {
 }
 
 pub fn run() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
-        .manage(TranslationState::default())
+        .manage(TranslationState::default());
+
+    #[cfg(feature = "tts")]
+    let builder = builder
         .manage(AudioState::default())
         .setup(|app| {
-            // Try to load Kokoro model in background on startup.
-            // If already downloaded (~/.cache/huggingface/), this is instant.
-            // If not downloaded yet, this will silently fail — user clicks DOWNLOAD later.
             let engine = app.state::<AudioState>().engine.clone();
             tauri::async_runtime::spawn(async move {
                 let mut guard = engine.lock().await;
@@ -429,18 +437,25 @@ pub fn run() {
                 }
             });
             Ok(())
-        })
-        .invoke_handler(tauri::generate_handler![
-            boka_start_translation,
-            boka_cancel_translation,
-            boka_generate_speech,
-            boka_cancel_audio,
-            boka_get_audio_status,
-            boka_preload_model,
-            boka_test_provider,
-            boka_read_stories,
-            boka_write_stories,
-        ])
+        });
+
+    let builder = builder.invoke_handler(tauri::generate_handler![
+        boka_start_translation,
+        boka_cancel_translation,
+        boka_test_provider,
+        boka_read_stories,
+        boka_write_stories,
+        #[cfg(feature = "tts")]
+        boka_generate_speech,
+        #[cfg(feature = "tts")]
+        boka_cancel_audio,
+        #[cfg(feature = "tts")]
+        boka_get_audio_status,
+        #[cfg(feature = "tts")]
+        boka_preload_model,
+    ]);
+
+    builder
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
