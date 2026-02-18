@@ -18,6 +18,7 @@ import type {
 } from './bokaTypes';
 import { start_mock_translation } from './mockTranslation';
 import { start_tauri_translation } from './tauriTranslation';
+import { readStoriesFromFile, writeStoriesToFile } from './tauriStorage';
 import { ensureAudioContext, playBase64Wav, stop as stopAudio } from './audioPlayer';
 import { generate_speech, get_audio_status, preload_model } from './tauriAudio';
 import { generate_mock_speech, get_mock_audio_status } from './mockAudio';
@@ -72,91 +73,121 @@ export default function App() {
   });
   const [cancelAudio, setCancelAudio] = useState<(() => void) | null>(null);
 
-  const [stories, setStories] = useState<Story[]>(() => {
-    try {
-      const raw = localStorage.getItem('boka.stories');
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (!Array.isArray(parsed)) return [];
-        return parsed
-          .map((s: any) => {
-            if (!s || typeof s !== 'object') return null;
-            if (typeof s.id !== 'string') return null;
-            if (typeof s.title !== 'string') return null;
-            if (typeof s.createdAt !== 'number') return null;
-            if (typeof s.updatedAt !== 'number') return null;
-            if (typeof s.sourceText !== 'string') return null;
-            if (typeof s.translations !== 'object' || !s.translations) return null;
+  const [stories, setStories] = useState<Story[]>([]);
+  const [storiesLoaded, setStoriesLoaded] = useState(false);
 
-            const story: Story = {
-              id: s.id,
-              title: s.title,
-              category: migrateCategory(s.category ?? s.archetypeId),
-              createdAt: s.createdAt,
-              updatedAt: s.updatedAt,
-              sourceText: s.sourceText,
-              sourceLanguage: typeof s.sourceLanguage === 'string' ? s.sourceLanguage : 'en',
-              translations: s.translations as Record<string, StoryTranslation>,
-            };
-            return story;
-          })
-          .filter(Boolean) as Story[];
+  // Load stories from file (Tauri) or localStorage (browser dev mode)
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      // Try file-based storage first (Tauri runtime)
+      const fileStories = await readStoriesFromFile();
+      if (cancelled) return;
+
+      if (fileStories !== null) {
+        // Loaded from file — apply category migration
+        const migrated = fileStories.map((s) => ({
+          ...s,
+          category: migrateCategory(s.category),
+        }));
+        setStories(migrated);
+        setStoriesLoaded(true);
+        return;
       }
-    } catch {}
 
-    try {
-      const raw = localStorage.getItem('boka.scripts');
-      if (!raw) return [];
-      const parsed = JSON.parse(raw);
-      if (!Array.isArray(parsed)) return [];
+      // Fallback: load from localStorage (browser dev mode)
+      let loaded: Story[] = [];
+      try {
+        const raw = localStorage.getItem('boka.stories');
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) {
+            loaded = parsed
+              .map((s: any) => {
+                if (!s || typeof s !== 'object') return null;
+                if (typeof s.id !== 'string') return null;
+                if (typeof s.title !== 'string') return null;
+                if (typeof s.createdAt !== 'number') return null;
+                if (typeof s.updatedAt !== 'number') return null;
+                if (typeof s.sourceText !== 'string') return null;
+                if (typeof s.translations !== 'object' || !s.translations) return null;
 
-      const legacyScripts: Script[] = parsed
-        .map((s: any) => {
-          if (!s || typeof s !== 'object') return null;
-          if (typeof s.id !== 'string') return null;
-          if (!s.doc || typeof s.doc !== 'object') return null;
-          if (!Array.isArray(s.doc.tokens) || typeof s.doc.spans !== 'object') return null;
+                const story: Story = {
+                  id: s.id,
+                  title: s.title,
+                  category: migrateCategory(s.category ?? s.archetypeId),
+                  createdAt: s.createdAt,
+                  updatedAt: s.updatedAt,
+                  sourceText: s.sourceText,
+                  sourceLanguage: typeof s.sourceLanguage === 'string' ? s.sourceLanguage : 'en',
+                  translations: s.translations as Record<string, StoryTranslation>,
+                };
+                return story;
+              })
+              .filter(Boolean) as Story[];
+          }
+        }
+      } catch {}
 
-          const script: Script = {
-            id: s.id,
-            title: typeof s.title === 'string' ? s.title : 'Untitled',
-            category: migrateCategory(s.category ?? s.archetypeId),
-            createdAt: typeof s.createdAt === 'number' ? s.createdAt : Date.now(),
-            job: s.job && typeof s.job === 'object' ? (s.job as TranslationJob) : null,
-            doc: s.doc as InteractiveDoc,
-          };
+      // Legacy scripts migration (localStorage only)
+      if (loaded.length === 0) {
+        try {
+          const raw = localStorage.getItem('boka.scripts');
+          if (raw) {
+            const parsed = JSON.parse(raw);
+            if (Array.isArray(parsed)) {
+              const legacyScripts: Script[] = parsed
+                .map((s: any) => {
+                  if (!s || typeof s !== 'object') return null;
+                  if (typeof s.id !== 'string') return null;
+                  if (!s.doc || typeof s.doc !== 'object') return null;
+                  if (!Array.isArray(s.doc.tokens) || typeof s.doc.spans !== 'object') return null;
 
-          return script;
-        })
-        .filter(Boolean) as Script[];
+                  const script: Script = {
+                    id: s.id,
+                    title: typeof s.title === 'string' ? s.title : 'Untitled',
+                    category: migrateCategory(s.category ?? s.archetypeId),
+                    createdAt: typeof s.createdAt === 'number' ? s.createdAt : Date.now(),
+                    job: s.job && typeof s.job === 'object' ? (s.job as TranslationJob) : null,
+                    doc: s.doc as InteractiveDoc,
+                  };
+                  return script;
+                })
+                .filter(Boolean) as Script[];
 
-      return legacyScripts.map((script) => {
-        const lang = 'unknown';
-        const t: StoryTranslation = {
-          language: lang,
-          createdAt: script.createdAt,
-          job: script.job,
-          doc: script.doc,
-          errorMessage: null,
-        };
-        const story: Story = {
-          id: `legacy-${script.id}`,
-          title: script.title,
-          category: script.category,
-          createdAt: script.createdAt,
-          updatedAt: script.createdAt,
-          sourceText: '',
-          sourceLanguage: 'en',
-          translations: {
-            [lang]: t,
-          },
-        };
-        return story;
-      });
-    } catch {
-      return [];
-    }
-  });
+              loaded = legacyScripts.map((script) => {
+                const lang = 'unknown';
+                const t: StoryTranslation = {
+                  language: lang,
+                  createdAt: script.createdAt,
+                  job: script.job,
+                  doc: script.doc,
+                  errorMessage: null,
+                };
+                const story: Story = {
+                  id: `legacy-${script.id}`,
+                  title: script.title,
+                  category: script.category,
+                  createdAt: script.createdAt,
+                  updatedAt: script.createdAt,
+                  sourceText: '',
+                  sourceLanguage: 'en',
+                  translations: { [lang]: t },
+                };
+                return story;
+              });
+            }
+          }
+        } catch {}
+      }
+
+      if (!cancelled) {
+        setStories(loaded);
+        setStoriesLoaded(true);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   const allCategories = useMemo(() => {
     const defaults = ['Daily Life', 'Travel', 'Work', 'Childhood', 'Food & Dining', 'Conflict', 'Reflection'];
@@ -230,11 +261,18 @@ export default function App() {
     } catch {}
   }, [denseSpans, provider, sourceLanguage, targetLanguage]);
 
+  // Save stories to file (Tauri) with localStorage fallback (browser dev)
   useEffect(() => {
-    try {
-      localStorage.setItem('boka.stories', JSON.stringify(stories));
-    } catch {}
-  }, [stories]);
+    if (!storiesLoaded) return; // Don't save until initial load completes
+    writeStoriesToFile(stories).then((written) => {
+      if (!written) {
+        // Fallback: save to localStorage in browser dev mode
+        try {
+          localStorage.setItem('boka.stories', JSON.stringify(stories));
+        } catch {}
+      }
+    });
+  }, [stories, storiesLoaded]);
 
   useEffect(() => {
     try {

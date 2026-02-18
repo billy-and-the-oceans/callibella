@@ -1,6 +1,7 @@
 mod boka;
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc,
@@ -17,6 +18,13 @@ use boka::types::{ApiConfig, LlmProviderConfig, LlmProviderPreset};
 use serde::Serialize;
 use tauri::async_runtime::Mutex;
 use tauri::{Emitter, Manager};
+
+/// Shared data directory for cross-app compatibility (TUI + GUI).
+/// Both apps read/write stories.json here.
+fn shared_data_dir() -> Result<PathBuf, String> {
+    let home = dirs::home_dir().ok_or("Could not determine home directory")?;
+    Ok(home.join("Library").join("Application Support").join("boka"))
+}
 
 #[derive(Default)]
 struct TranslationState {
@@ -365,6 +373,43 @@ async fn boka_cancel_translation(
     Ok(())
 }
 
+#[tauri::command]
+async fn boka_read_stories() -> Result<serde_json::Value, String> {
+    let dir = shared_data_dir()?;
+    let path = dir.join("stories.json");
+
+    if !path.exists() {
+        return Ok(serde_json::Value::Array(vec![]));
+    }
+
+    let contents = std::fs::read_to_string(&path)
+        .map_err(|e| format!("Failed to read stories.json: {}", e))?;
+    let value: serde_json::Value = serde_json::from_str(&contents)
+        .map_err(|e| format!("Failed to parse stories.json: {}", e))?;
+
+    Ok(value)
+}
+
+#[tauri::command]
+async fn boka_write_stories(stories: serde_json::Value) -> Result<(), String> {
+    let dir = shared_data_dir()?;
+    std::fs::create_dir_all(&dir)
+        .map_err(|e| format!("Failed to create data dir: {}", e))?;
+
+    let json = serde_json::to_string_pretty(&stories)
+        .map_err(|e| format!("Failed to serialize stories: {}", e))?;
+
+    // Atomic write: write to tmp file, then rename
+    let tmp = dir.join("stories.json.tmp");
+    let path = dir.join("stories.json");
+    std::fs::write(&tmp, &json)
+        .map_err(|e| format!("Failed to write stories: {}", e))?;
+    std::fs::rename(&tmp, &path)
+        .map_err(|e| format!("Failed to finalize stories: {}", e))?;
+
+    Ok(())
+}
+
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -393,6 +438,8 @@ pub fn run() {
             boka_get_audio_status,
             boka_preload_model,
             boka_test_provider,
+            boka_read_stories,
+            boka_write_stories,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

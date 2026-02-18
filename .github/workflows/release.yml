@@ -1,10 +1,14 @@
 # Callibella Release Workflow
 #
-# Builds and releases the Tauri app for all platforms with code signing.
+# Two-stage build: CLI sidecar first, then Tauri GUI with sidecar bundled.
+#
+# The CLI (boka TUI) source lives in fuwa-cloud monorepo. This workflow
+# checks it out to build the sidecar binary.
 #
 # Required secrets:
 #   TAURI_SIGNING_PRIVATE_KEY - The private key for signing updates
 #   TAURI_SIGNING_PRIVATE_KEY_PASSWORD - Password for the private key
+#   FUWA_CLOUD_TOKEN - PAT with access to fuwa-cloud monorepo (if private)
 #
 # Trigger by pushing a version tag:
 #   git tag v0.1.0
@@ -42,8 +46,63 @@ jobs:
           draft: true
           prerelease: false
 
-  build:
+  build-cli:
     needs: create-release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest
+            target: aarch64-apple-darwin
+            binary: boka
+          - platform: macos-latest
+            target: x86_64-apple-darwin
+            binary: boka
+          - platform: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            binary: boka
+          - platform: windows-latest
+            target: x86_64-pc-windows-msvc
+            binary: boka.exe
+
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - name: Checkout fuwa-cloud monorepo (TUI source)
+        uses: actions/checkout@v4
+        with:
+          repository: billy-and-the-oceans/fuwa-cloud
+          token: ${{ secrets.FUWA_CLOUD_TOKEN || secrets.GITHUB_TOKEN }}
+          path: fuwa-cloud
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Build CLI binary
+        run: cargo build --release --bin boka --target ${{ matrix.target }} --manifest-path fuwa-cloud/packages/fuwa-tui/Cargo.toml
+
+      - name: Upload CLI artifact for sidecar
+        uses: actions/upload-artifact@v4
+        with:
+          name: cli-${{ matrix.target }}
+          path: fuwa-cloud/packages/fuwa-tui/target/${{ matrix.target }}/release/${{ matrix.binary }}
+
+      - name: Package CLI standalone
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/v}"
+          ARCHIVE="boka-cli-v${VERSION}-${{ matrix.target }}.tar.gz"
+          tar czf "${ARCHIVE}" -C "fuwa-cloud/packages/fuwa-tui/target/${{ matrix.target }}/release" ${{ matrix.binary }}
+          echo "ARCHIVE=${ARCHIVE}" >> "$GITHUB_ENV"
+
+      - name: Upload CLI to release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload ${{ github.ref_name }} ${{ env.ARCHIVE }} -R ${{ github.repository }} --clobber
+
+  build-gui:
+    needs: [create-release, build-cli]
     strategy:
       fail-fast: false
       matrix:
@@ -59,7 +118,7 @@ jobs:
             bundles: appimage,deb
           - platform: windows-latest
             target: x86_64-pc-windows-msvc
-            bundles: msi,nsis
+            bundles: nsis
 
     runs-on: ${{ matrix.platform }}
     steps:
@@ -83,6 +142,24 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
 
+      - name: Download CLI sidecar
+        uses: actions/download-artifact@v4
+        with:
+          name: cli-${{ matrix.target }}
+          path: src-tauri/binaries/
+
+      - name: Rename CLI sidecar to target triple
+        shell: bash
+        run: |
+          cd src-tauri/binaries
+          if [ "${{ matrix.platform }}" = "windows-latest" ]; then
+            mv boka.exe "boka-${{ matrix.target }}.exe"
+          else
+            mv boka "boka-${{ matrix.target }}"
+            chmod +x "boka-${{ matrix.target }}"
+          fi
+          ls -la
+
       - name: Install frontend dependencies
         run: npm ci
 
@@ -97,7 +174,7 @@ jobs:
           args: --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
 
   generate-latest:
-    needs: [create-release, build]
+    needs: [create-release, build-gui]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -145,9 +222,9 @@ jobs:
 
           first=true
 
-          # macOS ARM
-          sig=$(get_sig "aarch64.dmg")
-          url=$(get_url "aarch64.dmg")
+          # macOS ARM (updater uses .app.tar.gz, not .dmg)
+          sig=$(get_sig "aarch64.app.tar.gz")
+          url=$(get_url "aarch64.app.tar.gz")
           if [ -n "$sig" ] && [ -n "$url" ]; then
             [ "$first" = false ] && echo "," >> latest.json
             first=false
@@ -159,9 +236,9 @@ jobs:
           EOF
           fi
 
-          # macOS Intel
-          sig=$(get_sig "x64.dmg")
-          url=$(get_url "x64.dmg")
+          # macOS Intel (updater uses .app.tar.gz, not .dmg)
+          sig=$(get_sig "x64.app.tar.gz")
+          url=$(get_url "x64.app.tar.gz")
           if [ -n "$sig" ] && [ -n "$url" ]; then
             [ "$first" = false ] && echo "," >> latest.json
             first=false
@@ -173,9 +250,9 @@ jobs:
           EOF
           fi
 
-          # Linux
-          sig=$(get_sig "amd64.AppImage")
-          url=$(get_url "amd64.AppImage")
+          # Linux (updater uses .AppImage.tar.gz)
+          sig=$(get_sig "amd64.AppImage.tar.gz")
+          url=$(get_url "amd64.AppImage.tar.gz")
           if [ -n "$sig" ] && [ -n "$url" ]; then
             [ "$first" = false ] && echo "," >> latest.json
             first=false
@@ -187,9 +264,9 @@ jobs:
           EOF
           fi
 
-          # Windows NSIS
-          sig=$(get_sig "x64-setup.nsis")
-          url=$(get_url "x64-setup.nsis")
+          # Windows NSIS (updater uses .nsis.zip)
+          sig=$(get_sig "x64-setup.nsis.zip")
+          url=$(get_url "x64-setup.nsis.zip")
           if [ -n "$sig" ] && [ -n "$url" ]; then
             [ "$first" = false ] && echo "," >> latest.json
             first=false
